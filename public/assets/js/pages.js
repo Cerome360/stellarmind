@@ -72,13 +72,45 @@ async function loadStatusPage() {
 
 async function loadTxPage() {
   try {
-    const txs = await (await fetch('/api/wallet/transactions')).json()
+    const response = await fetch('/api/wallet/transactions')
+    const data = await response.json()
+    
+    // Handle error state
+    if (!data.success) {
+      const errorHtml = `
+        <tr>
+          <td colspan="5" style="text-align:center;padding:32px;">
+            <div style="color:var(--red);margin-bottom:12px;font-size:16px;">
+              ${getTransactionErrorIcon(data.errorType)} ${data.message || 'Failed to load transactions'}
+            </div>
+            ${data.retryable ? `
+              <button onclick="loadTxPage()" style="padding:8px 16px;background:var(--accent);color:white;border:none;border-radius:4px;cursor:pointer;">
+                🔄 Retry
+              </button>
+              <div style="color:var(--text-muted);font-size:12px;margin-top:8px;">
+                Error ID: ${data.correlationId || 'N/A'}
+              </div>
+            ` : `
+              <div style="color:var(--text-muted);font-size:12px;margin-top:8px;">
+                ${data.errorType === 'ACCOUNT_NOT_FOUND' ? 'Run the wallet setup first to fund this account.' : ''}
+              </div>
+            `}
+          </td>
+        </tr>
+      `
+      document.getElementById('tx-body').innerHTML = errorHtml
+      document.getElementById('tx-cnt').textContent = '0'
+      document.getElementById('tx-total').textContent = '0 Transactions'
+      return
+    }
+    
+    const txs = data.transactions || []
     document.getElementById('tx-cnt').textContent = txs.length
-    document.getElementById('tx-total').textContent = `${txs.length} Transactions`
+    document.getElementById('tx-total').textContent = `${txs.length} Transaction${txs.length !== 1 ? 's' : ''}`
 
     if (!txs.length) {
       document.getElementById('tx-body').innerHTML =
-        '<tr><td colspan="5" style="text-align:center;padding:32px;color:var(--text-muted);">No transactions yet. Run the orchestrator first!</td></tr>'
+        '<tr><td colspan="5" style="text-align:center;padding:32px;color:var(--text-muted);">✅ No transactions yet. This account is empty but valid.</td></tr>'
       return
     }
 
@@ -113,10 +145,34 @@ async function loadTxPage() {
         </tr>`
       })
       .join('')
-  } catch {
-    document.getElementById('tx-body').innerHTML =
-      '<tr><td colspan="5" style="text-align:center;padding:32px;color:var(--text-muted);">Failed to load transactions.</td></tr>'
+  } catch (err) {
+    console.error('Failed to load transactions:', err)
+    document.getElementById('tx-body').innerHTML = `
+      <tr>
+        <td colspan="5" style="text-align:center;padding:32px;">
+          <div style="color:var(--red);margin-bottom:12px;">
+            🌐 Network error: ${err.message}
+          </div>
+          <button onclick="loadTxPage()" style="padding:8px 16px;background:var(--accent);color:white;border:none;border-radius:4px;cursor:pointer;">
+            🔄 Retry
+          </button>
+        </td>
+      </tr>
+    `
   }
+}
+
+/**
+ * Get icon for transaction error types
+ */
+function getTransactionErrorIcon(errorType) {
+  const icons = {
+    ACCOUNT_NOT_FOUND: '❌',
+    TIMEOUT: '⏱️',
+    NETWORK_ERROR: '🌐',
+    UPSTREAM_ERROR: '⚠️',
+  }
+  return icons[errorType] || '⚠️'
 }
 
 async function saveApiKey() {
