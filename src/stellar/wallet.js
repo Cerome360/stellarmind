@@ -1,14 +1,12 @@
-import {
-  Keypair,
-  Horizon,
-  Networks,
-  TransactionBuilder,
-  Operation,
-  Asset,
-} from '@stellar/stellar-sdk'
+import { Keypair, Horizon, TransactionBuilder, Operation, Asset } from '@stellar/stellar-sdk'
 import { config } from '../config.js'
+import { explorerTxUrl, getFriendbotUrl } from './network.js'
 
-const HORIZON_URL = 'https://horizon-testnet.stellar.org'
+// One validated profile drives every network fact in this module: Horizon
+// origin, transaction passphrase, explorer links, and the friend-only funding
+// helper. Nothing here hard-codes testnet any more.
+const profile = config.networkProfile
+const HORIZON_URL = profile.horizonUrl
 const server = new Horizon.Server(HORIZON_URL)
 
 // ── Bounded concurrency and caching for per-transaction operation lookups ─────
@@ -58,10 +56,10 @@ export function operationsCacheEntryCount() {
  * (`NETWORK`), so a result fetched on one profile must never answer a lookup on
  * another. The endpoint is part of the key for the same reason.
  */
-export function operationsCacheKey(hash, horizonServer = server, profile = config.network) {
+export function operationsCacheKey(hash, horizonServer = server, profileId = config.network) {
   const endpoint =
     horizonServer?.serverURL || horizonServer?.serverUrl || horizonServer?.url || HORIZON_URL
-  return `${profile}|${endpoint}|${hash}`
+  return `${profileId}|${endpoint}|${hash}`
 }
 
 function cacheLookup(key) {
@@ -171,7 +169,7 @@ export async function sendPayment(senderSecret, recipientPublic, amount, memo = 
 
     const txBuilder = new TransactionBuilder(senderAccount, {
       fee: '100',
-      networkPassphrase: Networks.TESTNET,
+      networkPassphrase: profile.passphrase,
     })
 
     txBuilder.addOperation(
@@ -195,7 +193,7 @@ export async function sendPayment(senderSecret, recipientPublic, amount, memo = 
       success: true,
       txHash: result.hash,
       ledger: result.ledger,
-      explorerUrl: `https://stellar.expert/explorer/testnet/tx/${result.hash}`,
+      explorerUrl: explorerTxUrl(profile, result.hash),
     }
   } catch (err) {
     console.error('Payment failed:', err.message)
@@ -204,11 +202,12 @@ export async function sendPayment(senderSecret, recipientPublic, amount, memo = 
 }
 
 /**
- * Fund a wallet via Friendbot (testnet only)
+ * Fund a wallet via Friendbot. Testnet only: `getFriendbotUrl` refuses to
+ * return a helper for any profile that does not define one.
  */
 export async function fundWithFriendbot(publicKey) {
   try {
-    const response = await fetch(`https://friendbot.stellar.org?addr=${publicKey}`)
+    const response = await fetch(`${getFriendbotUrl(profile)}?addr=${publicKey}`)
     const data = await response.json()
     return { success: true, data }
   } catch (err) {
@@ -255,7 +254,7 @@ export async function getTransactions(publicKey, limit = 10, cursor = null, orde
           // Distinguishes "this transaction has no operations" from "the lookup
           // failed" — both used to arrive as an empty array.
           ...(error ? { operationsError: error } : {}),
-          explorerUrl: `https://stellar.expert/explorer/testnet/tx/${tx.hash}`,
+          explorerUrl: explorerTxUrl(profile, tx.hash),
         }
       }
     )

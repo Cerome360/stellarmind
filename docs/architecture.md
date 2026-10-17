@@ -243,14 +243,26 @@ prices are enforced by [`pricing.config.js`](../src/pricing.config.js).
 Driven by environment variables (see [`.env.example`](../.env.example) and
 [`src/config.js`](../src/config.js)):
 
-| Variable                                   | Purpose                                                        |
-| ------------------------------------------ | -------------------------------------------------------------- |
-| `ANTHROPIC_API_KEY`                        | Enables live Claude calls; without it, demo fallbacks are used |
-| `SERVER_STELLAR_ADDRESS` / `_SECRET`       | Receives payments; presence enables the x402 paywall           |
-| `ORCHESTRATOR_STELLAR_ADDRESS` / `_SECRET` | Pays for agent calls (x402 + XLM fallback)                     |
-| `NETWORK`                                  | Stellar network (default `stellar:testnet`)                    |
-| `FACILITATOR_URL`                          | x402 facilitator that verifies and settles payments            |
-| `INTERNAL_BASE_URL`                        | Origin the orchestrator uses to reach `/api/premium/*`         |
+| Variable                                   | Purpose                                                                 |
+| ------------------------------------------ | ----------------------------------------------------------------------- |
+| `ANTHROPIC_API_KEY`                        | Enables live Claude calls; without it, demo fallbacks are used          |
+| `SERVER_STELLAR_ADDRESS` / `_SECRET`       | Receives payments; presence enables the x402 paywall                    |
+| `ORCHESTRATOR_STELLAR_ADDRESS` / `_SECRET` | Pays for agent calls (x402 + XLM fallback)                              |
+| `NETWORK`                                  | Stellar network profile (default and only supported: `stellar:testnet`) |
+| `FACILITATOR_URL`                          | x402 facilitator that verifies and settles payments                     |
+| `STELLAR_RPC_URL` / `STELLAR_HORIZON_URL`  | Optional; must match the selected profile or startup fails              |
+| `INTERNAL_BASE_URL`                        | Origin the orchestrator uses to reach `/api/premium/*`                  |
+
+### Network Profile
+
+[`src/stellar/network.js`](../src/stellar/network.js) is the single source of truth for the network
+identifier, transaction passphrase, Horizon/RPC origins, explorer origin, and asset identity (USDC
+issuer). [`src/config.js`](../src/config.js) resolves and validates that profile at startup and
+exposes it as `config.networkProfile`; every wallet, payment, and explorer link then reads from it
+instead of hard-coding testnet. `stellar:testnet` is supported. Unknown networks, and recognised but
+disabled networks such as `stellar:pubnet`, fail at startup with a `NetworkConfigError`. Endpoint
+overrides that point at a different network are rejected as mismatches. Friendbot is available only
+on the testnet profile.
 
 ## Related
 
