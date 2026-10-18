@@ -139,18 +139,45 @@ export async function fetchTransactionOperations(hash, horizonServer = server) {
 
 /**
  * Get balance for a Stellar public key
+ * 
+ * Returns an object with:
+ * - success: boolean indicating if the operation succeeded
+ * - balances: array of balance objects (only present when success is true)
+ * - error: error details (only present when success is false)
+ * - errorType: categorized error type for client handling
  */
 export async function getBalance(publicKey) {
   try {
     const account = await server.loadAccount(publicKey)
-    return account.balances.map((b) => ({
+    const balances = account.balances.map((b) => ({
       asset: b.asset_type === 'native' ? 'XLM' : `${b.asset_code}`,
       balance: b.balance,
       issuer: b.asset_issuer || null,
     }))
+    
+    return {
+      success: true,
+      balances,
+    }
   } catch (err) {
     console.error(`Failed to load balance for ${publicKey}:`, err.message)
-    return []
+    
+    // Categorize the error type
+    let errorType = 'UPSTREAM_ERROR'
+    if (err.response?.status === 404) {
+      errorType = 'ACCOUNT_NOT_FOUND'
+    } else if (err.message?.includes('timeout') || err.code === 'ETIMEDOUT') {
+      errorType = 'TIMEOUT'
+    } else if (err.message?.includes('ENOTFOUND') || err.message?.includes('ECONNREFUSED')) {
+      errorType = 'NETWORK_ERROR'
+    }
+    
+    return {
+      success: false,
+      error: err.message,
+      errorType,
+      timestamp: new Date().toISOString(),
+    }
   }
 }
 
@@ -218,6 +245,12 @@ export async function fundWithFriendbot(publicKey) {
 
 /**
  * Get recent transactions for a wallet
+ * 
+ * Returns an object with:
+ * - success: boolean indicating if the operation succeeded
+ * - transactions: array of transaction objects (only present when success is true)
+ * - error: error details (only present when success is false)
+ * - errorType: categorized error type for client handling
  */
 export async function getTransactions(publicKey, limit = 10, cursor = null, order = 'desc') {
   try {
@@ -260,9 +293,28 @@ export async function getTransactions(publicKey, limit = 10, cursor = null, orde
       }
     )
 
-    return decorated
+    return {
+      success: true,
+      transactions: decorated,
+    }
   } catch (err) {
     console.error('Failed to fetch transactions:', err.message)
-    return []
+    
+    // Categorize the error type
+    let errorType = 'UPSTREAM_ERROR'
+    if (err.response?.status === 404) {
+      errorType = 'ACCOUNT_NOT_FOUND'
+    } else if (err.message?.includes('timeout') || err.code === 'ETIMEDOUT') {
+      errorType = 'TIMEOUT'
+    } else if (err.message?.includes('ENOTFOUND') || err.message?.includes('ECONNREFUSED')) {
+      errorType = 'NETWORK_ERROR'
+    }
+    
+    return {
+      success: false,
+      error: err.message,
+      errorType,
+      timestamp: new Date().toISOString(),
+    }
   }
 }
