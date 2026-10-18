@@ -62,8 +62,7 @@ const PREMIUM_ENDPOINT_MAP = {
   'code-bot': (input) => `/api/premium/code?prompt=${encodeURIComponent(input)}`,
 }
 
-const EXPLORER_NETWORK_SEGMENT = config.network.includes('testnet') ? 'testnet' : 'public'
-const EXPLORER_BASE_URL = `https://stellar.expert/explorer/${EXPLORER_NETWORK_SEGMENT}/tx/`
+const EXPLORER_BASE_URL = `${config.networkProfile.explorerBaseUrl}/tx/`
 
 let x402Fetch = null
 let x402InitError = null
@@ -115,7 +114,10 @@ async function checkX402WalletReadiness() {
 
     if (!Number.isFinite(usdcAmount) || usdcAmount <= 0) {
       x402WalletReady = false
-      x402WalletHint = 'USDC balance is 0. Fund testnet USDC via https://faucet.circle.com'
+      const faucet = config.networkProfile.funding.faucetUrl
+      x402WalletHint = faucet
+        ? `USDC balance is 0. Fund ${config.networkProfile.label} USDC via ${faucet}`
+        : 'USDC balance is 0. Fund the orchestrator wallet with USDC to enable x402 payments.'
       logger.warn('x402_wallet_not_ready', { reason: x402WalletHint })
       return
     }
@@ -1135,7 +1137,9 @@ export async function executePlan(planId, broadcastFn, context = {}) {
 
   if (Date.now() > new Date(planRecord.expiresAt).getTime()) {
     activePlansStore.delete(planId)
-    const err = new Error(`Plan quote has expired at ${planRecord.expiresAt}. Please request a new preview.`)
+    const err = new Error(
+      `Plan quote has expired at ${planRecord.expiresAt}. Please request a new preview.`
+    )
     err.status = 400
     err.code = 'QUOTE_EXPIRED'
     throw err
@@ -1154,7 +1158,9 @@ export async function executePlan(planId, broadcastFn, context = {}) {
     const previewPrice = planRecord.pricesAtPreview[subtask.agentId]
     if (currentPrice !== previewPrice) {
       activePlansStore.delete(planId)
-      const err = new Error(`Agent '${subtask.agentId}' pricing has changed from ${previewPrice} to ${currentPrice}. Please request a new preview.`)
+      const err = new Error(
+        `Agent '${subtask.agentId}' pricing has changed from ${previewPrice} to ${currentPrice}. Please request a new preview.`
+      )
       err.status = 400
       err.code = 'QUOTE_CHANGED'
       throw err
