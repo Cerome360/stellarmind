@@ -209,3 +209,83 @@ async function saveApiKey() {
     btn.textContent = 'Update Key'
   }
 }
+
+async function loadHistoryPage() {
+  const listEl = document.getElementById('history-list')
+  const emptyEl = document.getElementById('history-empty')
+  const loadingEl = document.getElementById('history-loading')
+  const metaEl = document.getElementById('history-meta')
+  const prevBtn = document.getElementById('history-prev')
+  const nextBtn = document.getElementById('history-next')
+
+  loadingEl.style.display = 'block'
+  emptyEl.style.display = 'none'
+  listEl.innerHTML = ''
+
+  try {
+    const params = new URLSearchParams()
+    const statusFilter = document.getElementById('history-status-filter')?.value
+    const limit = document.getElementById('history-limit')?.value || 20
+    if (statusFilter) params.set('status', statusFilter)
+    params.set('limit', limit)
+    const res = await fetch(`/api/runs?${params.toString()}`)
+    const data = await res.json()
+    loadingEl.style.display = 'none'
+
+    if (!data.runs || data.runs.length === 0) {
+      emptyEl.style.display = 'block'
+      metaEl.textContent = 'No runs found'
+      prevBtn.disabled = true
+      nextBtn.disabled = true
+      return
+    }
+
+    metaEl.textContent = `Showing ${data.runs.length} run${data.runs.length !== 1 ? 's' : ''}`
+
+    listEl.innerHTML = data.runs
+      .map((run) => {
+        const status = run.status || 'unknown'
+        const statusClass = `status-${status}`
+        const created = run.createdAt ? new Date(run.createdAt).toLocaleString() : '—'
+        const completed = run.completedAt ? new Date(run.completedAt).toLocaleString() : '—'
+        const spent =
+          run.totalSpent !== undefined && run.totalSpent !== null
+            ? run.totalSpent
+            : (run.summary?.totalSpent ?? '0')
+        const budget =
+          run.budget !== undefined && run.budget !== null
+            ? run.budget
+            : (run.summary?.budget ?? '—')
+        const task = run.task || 'No task description'
+        const taskShort = task.length > 100 ? task.slice(0, 97) + '...' : task
+        return `
+          <div class="history-item" tabindex="0" role="button" data-run-id="${escapeHtml(run.id)}" onclick="openRunDetail('${escapeHtml(run.id)}')" onkeydown="if(event.key==='Enter'||event.key===' ') {event.preventDefault(); openRunDetail('${escapeHtml(run.id)}');}">
+            <div class="history-row">
+              <div class="history-id"><code>${escapeHtml(run.id)}</code></div>
+              <span class="history-status ${statusClass}">${escapeHtml(status)}</span>
+            </div>
+            <div class="history-task">${escapeHtml(taskShort)}</div>
+            <div class="history-meta">
+              <span>Created: ${escapeHtml(created)}</span>
+              <span>Completed: ${escapeHtml(completed)}</span>
+              <span>Spent: ${escapeHtml(spent)} / ${escapeHtml(budget)}</span>
+            </div>
+          </div>
+        `
+      })
+      .join('')
+
+    prevBtn.disabled = true // pagination not fully implemented in API yet; keep minimal
+    nextBtn.disabled = true
+  } catch (err) {
+    loadingEl.style.display = 'none'
+    emptyEl.style.display = 'block'
+    emptyEl.innerHTML = '<div class="es-icon">❌</div><p>Failed to load run history</p>'
+  }
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div')
+  div.textContent = text
+  return div.innerHTML
+}
