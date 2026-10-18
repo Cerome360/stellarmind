@@ -403,25 +403,63 @@ app.get('/api/agents/:id', (req, res, next) => {
 app.get('/api/wallet/balances', async (req, res, next) => {
   try {
     const wallets = {}
+    const walletConfigs = []
+    
     if (config.serverAddress) {
-      wallets.server = {
-        address: config.serverAddress,
-        balances: await getBalance(config.serverAddress),
-      }
+      walletConfigs.push({ key: 'server', address: config.serverAddress })
     }
     if (config.orchestratorAddress) {
-      wallets.orchestrator = {
-        address: config.orchestratorAddress,
-        balances: await getBalance(config.orchestratorAddress),
-      }
+      walletConfigs.push({ key: 'orchestrator', address: config.orchestratorAddress })
     }
     if (config.buyerAddress) {
-      wallets.buyer = {
-        address: config.buyerAddress,
-        balances: await getBalance(config.buyerAddress),
+      walletConfigs.push({ key: 'buyer', address: config.buyerAddress })
+    }
+    
+    // Fetch all wallet balances in parallel
+    const results = await Promise.all(
+      walletConfigs.map(async ({ key, address }) => {
+        const result = await getBalance(address)
+        return { key, address, ...result }
+      })
+    )
+    
+    // Build response with per-wallet availability
+    let hasAnyError = false
+    for (const result of results) {
+      const { key, address, success, balances, error, errorType, timestamp } = result
+      
+      if (success) {
+        wallets[key] = {
+          address,
+          balances,
+          available: true,
+        }
+      } else {
+        hasAnyError = true
+        wallets[key] = {
+          address,
+          available: false,
+          error: error || 'Unknown error',
+          errorType: errorType || 'UPSTREAM_ERROR',
+          timestamp: timestamp || new Date().toISOString(),
+        }
       }
     }
-    res.json(wallets)
+    
+    // Include correlation ID in response for debugging
+    const response = {
+      wallets,
+      timestamp: new Date().toISOString(),
+      correlationId: req.requestId,
+    }
+    
+    // If any wallet failed, include a partial availability notice
+    if (hasAnyError) {
+      response.partialAvailability = true
+      response.message = 'Some wallet data could not be retrieved. Check individual wallet status.'
+    }
+    
+    res.json(response)
   } catch (err) {
     next(err)
   }
@@ -430,7 +468,13 @@ app.get('/api/wallet/balances', async (req, res, next) => {
 app.get('/api/wallet/transactions', validateWalletTransactions, async (req, res, next) => {
   try {
     const address = req.validated?.address || config.orchestratorAddress || config.serverAddress
-    if (!address) return res.json([])
+    if (!address) {
+      return res.json({
+        success: true,
+        transactions: [],
+        message: 'No wallet address configured',
+      })
+    }
 
     // 1. Validate & clamp "limit"
     let limit = 20 // default
@@ -474,12 +518,47 @@ app.get('/api/wallet/transactions', validateWalletTransactions, async (req, res,
       return next(err)
     }
 
-    const txs = await getTransactions(address, limit, cursor, order)
-    res.json(txs)
+    const result = await getTransactions(address, limit, cursor, order)
+    
+    if (result.success) {
+      // Success case: return transactions
+      res.json({
+        success: true,
+        transactions: result.transactions,
+        address,
+        count: result.transactions.length,
+        correlationId: req.requestId,
+      })
+    } else {
+      // Error case: return error details with appropriate HTTP status
+      const statusCode = result.errorType === 'ACCOUNT_NOT_FOUND' ? 404 : 503
+      res.status(statusCode).json({
+        success: false,
+        error: result.error,
+        errorType: result.errorType,
+        message: getTransactionErrorMessage(result.errorType),
+        timestamp: result.timestamp,
+        correlationId: req.requestId,
+        retryable: result.errorType !== 'ACCOUNT_NOT_FOUND',
+      })
+    }
   } catch (err) {
     next(err)
   }
 })
+
+/**
+ * Get user-friendly error message for transaction errors
+ */
+function getTransactionErrorMessage(errorType) {
+  const messages = {
+    ACCOUNT_NOT_FOUND: 'Account not found on the Stellar network. It may not be funded yet.',
+    TIMEOUT: 'Request timed out while fetching transactions. Please try again.',
+    NETWORK_ERROR: 'Network error connecting to Horizon. Please check your connection and try again.',
+    UPSTREAM_ERROR: 'Horizon service is temporarily unavailable. Please try again later.',
+  }
+  return messages[errorType] || 'An unexpected error occurred while fetching transactions.'
+}
 
 // ─── System Status ───────────────────────────────────────────
 app.get('/api/status', (req, res) => {
