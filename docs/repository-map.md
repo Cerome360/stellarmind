@@ -97,6 +97,10 @@ Stellar blockchain integration for wallet management and payment settlement.
 
 ## Tests (`tests/`)
 
+1. `cp .env.example .env` — configure environment
+2. `npm install` — install dependencies
+3. `npm run dev` — start development server
+4. Visit `http://localhost:3001`
 - `*.test.js` — Unit and integration tests (Jest)
 - `load/` — Performance and load tests (k6, Artillery)
 
