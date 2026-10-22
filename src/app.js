@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 
 import { AGENTS, discoverAgents, getAgentById } from './agents/registry.js'
-import { validatePremiumQuery, validateWalletTransactions } from './requestValidation.js'
+import { validateWalletTransactions } from './requestValidation.js'
 import {
   runResearch,
   runSummary,
@@ -36,6 +36,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
  * @param {Object} dependencies.broadcast - SSE broadcast function
  * @param {Function} [dependencies.paymentMiddleware] - Optional x402 payment middleware
  * @param {Object} [dependencies.admissionQueue] - Optional orchestration admission queue
+ * @param {Object} [dependencies.premiumServices] - Optional premium handler injections
+ *   ({ runResearch, runSummary, runAnalysis, runCode, MODEL_LABELS })
  * @returns {Object} { app, close } - Express app and cleanup function
  */
 export function createApp(dependencies = {}) {
@@ -46,6 +48,7 @@ export function createApp(dependencies = {}) {
     broadcast,
     paymentMiddleware,
     admissionQueue = new OrchestrationAdmissionQueue(config.orchestrationQueue),
+    premiumServices = {},
   } = dependencies
 
   const app = express()
@@ -143,156 +146,25 @@ export function createApp(dependencies = {}) {
     })
   })
 
-  // Apply x402 payment middleware if provided
+  // Apply x402 payment middleware once, before the routes it protects
   if (paymentMiddleware) {
     app.use(paymentMiddleware)
     x402MiddlewareReady = true
   }
 
-  // Apply x402 payment middleware if provided
-  if (paymentMiddleware) {
-    app.use(paymentMiddleware)
-    x402MiddlewareReady = true
-  }
-
-  // Register premium routes (uses the actual premium route handlers from server.js)
-  app.get('/api/premium/research', validatePremiumQuery, async (req, res, next) => {
-    try {
-      const topic = req.validated.topic
-      const priceInfo = pricingConfig.getEndpointInfo('GET /api/premium/research')
-      const cost = priceInfo.price.slice(1)
-      actualBroadcast({
-        type: 'agent_call',
-        agent: `${priceInfo.emoji} Research Agent`,
-        agentId: 'research-bot',
-        input: topic,
-        cost,
-        timestamp: new Date().toISOString(),
-      })
-      const result = await runResearch(topic)
-      actualBroadcast({
-        type: 'agent_response',
-        agent: `${priceInfo.emoji} Research Agent`,
-        agentId: 'research-bot',
-        resultPreview: result.substring(0, 150),
-        cost,
-        timestamp: new Date().toISOString(),
-      })
-      res.json({
-        agent: 'research-bot',
-        topic,
-        result,
-        model: MODEL_LABELS.research,
-        cost: `${cost} USDC`,
-        paidVia: 'x402',
-      })
-    } catch (err) {
-      next(err)
-    }
-  })
-
-  app.get('/api/premium/summarize', validatePremiumQuery, async (req, res, next) => {
-    try {
-      const text = req.query.text || 'Please provide text to summarize via ?text= parameter'
-      const priceInfo = pricingConfig.getEndpointInfo('GET /api/premium/summarize')
-      const cost = priceInfo.price.slice(1)
-      actualBroadcast({
-        type: 'agent_call',
-        agent: `${priceInfo.emoji} Summary Agent`,
-        agentId: 'summary-bot',
-        input: text.substring(0, 100),
-        cost,
-        timestamp: new Date().toISOString(),
-      })
-      const result = await runSummary(text)
-      actualBroadcast({
-        type: 'agent_response',
-        agent: `${priceInfo.emoji} Summary Agent`,
-        agentId: 'summary-bot',
-        resultPreview: result.substring(0, 150),
-        cost,
-        timestamp: new Date().toISOString(),
-      })
-      res.json({
-        agent: 'summary-bot',
-        result,
-        model: MODEL_LABELS.summary,
-        cost: `${cost} USDC`,
-        paidVia: 'x402',
-      })
-    } catch (err) {
-      next(err)
-    }
-  })
-
-  app.get('/api/premium/analyze', validatePremiumQuery, async (req, res, next) => {
-    try {
-      const topic = req.validated.topic
-      const priceInfo = pricingConfig.getEndpointInfo('GET /api/premium/analyze')
-      const cost = priceInfo.price.slice(1)
-      actualBroadcast({
-        type: 'agent_call',
-        agent: `${priceInfo.emoji} Analysis Agent`,
-        agentId: 'analyst-bot',
-        input: topic,
-        cost,
-        timestamp: new Date().toISOString(),
-      })
-      const result = await runAnalysis(topic)
-      actualBroadcast({
-        type: 'agent_response',
-        agent: `${priceInfo.emoji} Analysis Agent`,
-        agentId: 'analyst-bot',
-        resultPreview: result.substring(0, 150),
-        cost,
-        timestamp: new Date().toISOString(),
-      })
-      res.json({
-        agent: 'analyst-bot',
-        topic,
-        result,
-        model: MODEL_LABELS.analysis,
-        cost: `${cost} USDC`,
-        paidVia: 'x402',
-      })
-    } catch (err) {
-      next(err)
-    }
-  })
-
-  app.get('/api/premium/code', validatePremiumQuery, async (req, res, next) => {
-    try {
-      const prompt = req.validated.prompt
-      const priceInfo = pricingConfig.getEndpointInfo('GET /api/premium/code')
-      const cost = priceInfo.price.slice(1)
-      actualBroadcast({
-        type: 'agent_call',
-        agent: `${priceInfo.emoji} Code Agent`,
-        agentId: 'code-bot',
-        input: prompt.substring(0, 100),
-        cost,
-        timestamp: new Date().toISOString(),
-      })
-      const result = await runCode(prompt)
-      actualBroadcast({
-        type: 'agent_response',
-        agent: `${priceInfo.emoji} Code Agent`,
-        agentId: 'code-bot',
-        resultPreview: result.substring(0, 150),
-        cost,
-        timestamp: new Date().toISOString(),
-      })
-      res.json({
-        agent: 'code-bot',
-        prompt,
-        result,
-        model: MODEL_LABELS.code,
-        cost: `${cost} USDC`,
-        paidVia: 'x402',
-      })
-    } catch (err) {
-      next(err)
-    }
+  // Premium routes are registered only here, by their route module (issue
+  // #128). Registering the same paths a second time in this factory meant
+  // requests never reached the module the integration suite exercised, so
+  // validated input and handler behaviour could silently diverge.
+  registerPremiumRoutes(app, {
+    pricingConfig,
+    broadcast: actualBroadcast,
+    runResearch,
+    runSummary,
+    runAnalysis,
+    runCode,
+    MODEL_LABELS,
+    ...premiumServices,
   })
 
   // Free Agent Endpoints (for internal orchestrator use)
@@ -430,7 +302,8 @@ export function createApp(dependencies = {}) {
 
       if (hasAnyError) {
         response.partialAvailability = true
-        response.message = 'Some wallet data could not be retrieved. Check individual wallet status.'
+        response.message =
+          'Some wallet data could not be retrieved. Check individual wallet status.'
       }
 
       res.json(response)
@@ -520,7 +393,8 @@ export function createApp(dependencies = {}) {
     const messages = {
       ACCOUNT_NOT_FOUND: 'Account not found on the Stellar network. It may not be funded yet.',
       TIMEOUT: 'Request timed out while fetching transactions. Please try again.',
-      NETWORK_ERROR: 'Network error connecting to Horizon. Please check your connection and try again.',
+      NETWORK_ERROR:
+        'Network error connecting to Horizon. Please check your connection and try again.',
       UPSTREAM_ERROR: 'Horizon service is temporarily unavailable. Please try again later.',
     }
     return messages[errorType] || 'An unexpected error occurred while fetching transactions.'
@@ -604,7 +478,7 @@ export function createApp(dependencies = {}) {
     sseClients.forEach((res) => {
       try {
         res.end()
-      } catch (err) {
+      } catch {
         // Ignore errors during cleanup
       }
     })
